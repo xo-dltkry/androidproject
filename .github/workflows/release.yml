@@ -1,0 +1,156 @@
+name: Android CI
+
+permissions:
+  contents: write
+  pull-requests: read
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build-apk:
+    name: Build Signed APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - name: Decode Keystore
+        id: decode_keystore
+        uses: timheuer/base64-to-file@v1.2.4
+        with:
+          fileName: 'android_keystore.jks'
+          fileDir: '/home/runner/work/RecurringExpenseTracker/RecurringExpenseTracker/app/keystore/'
+          encodedString: ${{ secrets.KEYSTORE }}
+      - id: get_version
+        uses: battila7/get-version-action@v2
+      - name: Build APK
+        run: ./gradlew :app:assembleRelease -x test
+        env:
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          ABOUT_LIBRARIES_TOKEN: ${{ secrets.ABOUT_LIBRARIES_TOKEN }}
+      - name: Verify Signature
+        run: $ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner verify --print-certs app/build/outputs/apk/release/RecurringExpenseTracker_${{ steps.get_version.outputs.version-without-v }}.apk
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: app/build/outputs/apk/release/RecurringExpenseTracker_${{ steps.get_version.outputs.version-without-v }}.apk
+  build-appbundle:
+    name: Build Signed AppBundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - name: Decode Keystore
+        id: decode_keystore
+        uses: timheuer/base64-to-file@v1.2.4
+        with:
+          fileName: 'android_keystore.jks'
+          fileDir: '/home/runner/work/RecurringExpenseTracker/RecurringExpenseTracker/app/keystore/'
+          encodedString: ${{ secrets.KEYSTORE_PLAY_STORE }}
+      - name: Build AppBundle
+        run: ./gradlew :app:bundleRelease -x test
+        env:
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_PLAY_STORE_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PLAY_STORE_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PLAY_STORE_PASSWORD }}
+          ABOUT_LIBRARIES_TOKEN: ${{ secrets.ABOUT_LIBRARIES_TOKEN }}
+      - name: Upload AppBundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: appbundle
+          path: app/build/outputs/bundle/release/app-release.aab
+      - name: Create whatsnew
+        id: createWhatsNew
+        run: mkdir -p whatsnew && ls -v fastlane/metadata/android/en-US/changelogs/*.txt | tail -n 1 | xargs cat > whatsnew/whatsnew-en-US
+      - name: Upload whatsnew
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsnew
+          path: whatsnew/whatsnew-en-US
+  release:
+    name: Release
+    needs: [build-apk, build-appbundle]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download APK from build
+        uses: actions/download-artifact@v4
+        with:
+          name: apk
+      - name: Download aab from build
+        uses: actions/download-artifact@v4
+        with:
+          name: appbundle
+      - name: Download whatsnew from build
+        uses: actions/download-artifact@v4
+        with:
+          name: whatsnew
+          path: whatsnew
+      - id: get_version
+        uses: battila7/get-version-action@v2
+      - name: Build Changelog
+        id: github_release
+        uses: mikepenz/release-changelog-builder-action@v5
+        with:
+          configurationJson: |
+            {
+              "categories": [
+                {
+                  "title": "## 🚀 New Features",
+                  "labels": [
+                    "feature"
+                  ]
+                },
+                {
+                  "title": "## 🐛 Bugs fixed",
+                  "labels": [
+                    "bug"
+                  ]
+                },
+                {
+                  "title": "## 🧪 Updated Translations",
+                  "labels": [
+                    "translations"
+                  ]
+                },
+                {
+                  "title": "## 💬 Minor Changes",
+                  "labels": [
+                    "cleanup / restructuring",
+                    "dependencies"
+                  ]
+                }
+              ],
+              "pr_template": "- #{{TITLE}} by @#{{AUTHOR}} in ##{{NUMBER}}"
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release
+        uses: mikepenz/action-gh-release@v1
+        with:
+          body: ${{steps.github_release.outputs.changelog}}
+          draft: true
+          files: RecurringExpenseTracker_${{ steps.get_version.outputs.version-without-v }}.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Deploy to Play Store
+        id: deploy
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT_JSON }}
+          packageName: de.dbauer.expensetracker
+          releaseFiles: app-release.aab
+          track: production
+          whatsNewDirectory: whatsnew/

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "labels": ["dependencies"],
+  "extends": [
+    "config:recommended",
+    ":disableDependencyDashboard",
+    ":separatePatchReleases",
+    ":separateMultipleMajorReleases"
+  ],
+  "rebaseWhen": "auto",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": [
+        "^.*.ya?ml$"
+      ],
+      "matchStrings": [
+        "datasource=(?<datasource>.*?) depName=(?<depName>.*?)( versioning=(?<versioning>.*?))?\\s.*?\"(?<currentValue>.*)\"\\s"
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackagePatterns": [
+        "org.jetbrains.kotlin.*",
+        "com.google.devtools.ksp"
+      ],
+      "groupName": "kotlin"
+    },
+    {
+      "matchPackagePatterns": [
+        "io.mockk"
+      ],
+      "groupName": "mockk"
+    },
+    {
+      "matchPackagePatterns": [
+        "com.pinterest.ktlint",
+        "org.jlleitschuh.gradle.ktlint"
+      ],
+      "groupName": "ktlint"
+    },
+    {
+      "matchPackagePatterns": [
+        "com.android.library",
+        "com.android.application",
+        "gradle"
+      ],
+      "groupName": "gradle",
+      "enabled": false
+    }
+  ]
+}
